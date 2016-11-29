@@ -1,0 +1,261 @@
+const
+  Np = 5000;            //Number of particles
+  SNum = 100;       //Number of steps
+  Lx = 15;            //
+  Ly = 15;            //
+  R = 1;              // !!!do not change!!! radius of interaction
+  rr = R*R;
+  NumOfLayers =Trunc(Ly/R);    //Number of layers for graph
+  delta = 5*R;          // radius of wall interaction
+  pi_180 = pi/180;
+  V = 1;             //velocity magnitude
+  dt = 0.2;             // time interval
+  sleepingTime = Round(200*dt); //ms   - delay for drawing
+  alpha = 0.5; //weight constant of particle
+  beta = 5;    //weight constant for moving wall
+  Nmag =0.1;  //noise magnitude
+var
+  Form1: TForm1;
+  V0: array [1..Np,1..2] of single;
+  V1: array [1..Np,1..2] of single;
+  XY: array [1..Np,1..2] of single;
+  VxAv: array [0..NumOfLayers-1] of single;
+  StepNum, SN0: Integer;
+  tt: TTime;
+  IsDraw: Boolean;
+procedure Draw;
+const
+  s=2; //particle size
+  s_2=2*s;
+var  imW, imH: integer;  //image size in pixels
+     xM,yM: double;     //scale multipliers
+     i: integer;
+begin
+ imW:=Form1.Image1.Width;
+ imH:=Form1.Image1.Height;
+ xM:=imW/Lx;
+ yM:=imH/Ly;
+ Form1.Image1.Canvas.Brush.Color:=clWhite;            //canvas - полотно, тут определяем цвет заливки фона
+ Form1.Image1.Canvas.Rectangle(0,0,Trunc(Lx*xM),Trunc(Ly*yM));  //Trunc - целая часть, теперь рисуем кистью фон
+ Form1.Image1.Canvas.Brush.Color:=clBlack;  // выбираем цвет частиц и далее рисуем частички
+ for i:=1 to Np-1 do
+//   Form1.Image1.Canvas.Pixels[Trunc(xM*XY[i,1]),Trunc(yM*XY[i,2])]:=clBlack;
+   Form1.Image1.Canvas.Ellipse(Trunc(xM*XY[i,1])-s,Trunc(imH-yM*XY[i,2])-s,Trunc(xM*XY[i,1])+s,Trunc(imH-yM*XY[i,2])+s);
+ Form1.Image1.Canvas.Brush.Color:=clRed;
+ Form1.Image1.Canvas.Ellipse(Trunc(xM*XY[Np,1])-s_2,Trunc(imH-yM*XY[Np,2])-s_2,Trunc(xM*XY[Np,1])+s_2,Trunc(imH-yM*XY[Np,2])+s_2) ;
+end;
+
+procedure TForm1.FormCreate(Sender: TObject);   //когда создаётся форма, она сама нажимает на кнопку "set", чтобы получить начальные координаты частиц
+begin
+ Button2.Click;
+ Label4.Caption:=(IntToStr(Np)+' particles'+#10#13+'Noise='+FloatToStr(Nmag)+#10#13+'wall infl='+IntToStr(beta));
+end;
+
+procedure TForm1.Image2Click(Sender: TObject);
+begin
+
+end;
+
+procedure TForm1.Button2Click(Sender: TObject); //Button2:=Set
+var
+  i: integer; // loop counter
+  Th: single;
+begin
+  Randomize;
+  IsDraw:=CheckBox1.Checked;
+  StepNum:=0;
+  For i:=1 to Np do                // initializing random coordinates and velocities for particles
+   begin
+    Th:=random(360)*pi_180;
+    V0[i,1]:=V*Cos(Th);
+    V0[i,2]:=V*Sin(Th);
+    XY[i,1]:=Lx*random;
+    XY[i,2]:=Ly*random;
+   end;
+
+  if IsDraw then Draw;
+  Label1.Caption:=IntToStr(StepNum);
+end;
+
+procedure TForm1.Button3Click(Sender: TObject);        //Button3=Run/Stop;
+begin
+  if Np<5000 then Timer1.Interval:=sleepingTime
+             else Timer1.Interval:=1;
+  tt:=Time;
+  SN0:=StepNum;
+  Timer1.Enabled:=not Timer1.Enabled;
+  if Timer1.Enabled then Button3.caption:='Stop'
+                    else Button3.caption:='Run';
+end;
+
+procedure TForm1.Chart1UserDrawnSeries1Draw(ACanvas: TCanvas; const ARect: TRect
+  );
+begin
+
+end;
+
+procedure TForm1.CheckBox1Change(Sender: TObject);
+begin
+ IsDraw:=CheckBox1.Checked;
+end;
+
+
+procedure TForm1.Timer1Timer(Sender: TObject);
+begin
+ NextStep;
+
+ Label2.Caption:='Step #'+IntToStr(StepNum);
+ Label3.Caption:=IntToStr(Round(60*(StepNum-SN0)/((time-TT)*SecsPerDay)))+' steps/min';
+
+ if IsDraw then Draw;
+ AverageVelocities;
+ Graph;
+
+ Application.ProcessMessages;
+end;
+
+procedure NextStep;
+var
+  i, j, n: integer; // number of neighbors and loop counters, rr=R^2
+  Vm, Nx, Ny, se,ce, xI,yI,V1x,V1y,VxW: single;
+begin
+ For i:=1 to Np do       //Loop for particles
+   begin
+     V1[i,1]:=0;
+     V1[i,2]:=0;
+     xI:=XY[i,1];   //x coordinate of i particle
+     yI:=XY[i,2];   //y coordinate of i particle
+     V1x:=0;
+     V1y:=0;
+     n:=0;         //количество соседей
+     For j:=1 to Np do
+       If sqr(xI-XY[j,1])+sqr(yI-XY[j,2])<=rr then
+         begin
+          n:=n+1;
+          V1x:=V1x+V0[j,1];
+          V1y:=V1y+V0[j,2];
+         end;
+
+     if n>1 then               //нормировка скорости
+       begin
+         V1x:=V1x/n;
+         V1y:=V1y/n;
+       end;
+
+      VxW:=0;
+      if yI > Ly-delta then VxW:=beta;    //influence of the top wall
+      if yI < delta then VxW:=0;       //influence of the bottom wall
+
+      V1x:=V1x*alpha + V0[i,1]*(1-alpha) + VxW;
+      V1y:=V1y*alpha + V0[i,2]*(1-alpha);
+
+      Vm:=1/(sqrt(V1x*V1x+V1y*V1y));
+      V1x:=V1x*Vm;
+      V1y:=V1y*Vm;
+
+      //add noise
+      Sincos(random(360)*pi_180, se, ce);      //func which counts sins and cos faster, ce=cos,se=sin
+      Nx:=Nmag*ce;
+      Ny:=Nmag*se;
+
+      V1x:=V1x + Nx;
+      V1y:=V1y + Ny;
+
+      Vm:=1/(sqrt(V1x*V1x+V1y*V1y));
+      V1x:=V1x*Vm;
+      V1y:=V1y*Vm;
+
+      //Move particles
+      XY[i,1]:=XY[i,1] + V1x*dt;
+      XY[i,2]:=XY[i,2] + V1y*dt;
+
+      //boundary conditions
+      If XY[i,1]>=Lx then XY[i,1]:=XY[i,1]-Lx;
+      If XY[i,1]<=0 then XY[i,1]:=XY[i,1]+Lx;
+
+      If XY[i,2]>=Ly then
+       begin
+         XY[i,2]:=2*Ly-XY[i,2];
+         V1y:= - V1y;
+       end;
+
+      If XY[i,2]<=0 then
+       begin
+         XY[i,2]:=Abs(XY[i,2]);
+         V1y:= - V1y;
+       end;
+
+      V1[i,1]:=V1x;
+      V1[i,2]:=V1y;
+    end;
+
+   V0:=V1;
+   StepNum:=StepNum+1;
+end;
+
+procedure TForm1.Button1Click(Sender: TObject);   //Button1:=Run 100
+var  m: integer; // number of neighbors and loop counters, rr=R^2
+begin
+ For m:=1 to SNum do
+  begin
+     NextStep;
+     Label2.Caption:='Step #'+IntToStr(stepNum);
+     Draw;
+     Application.ProcessMessages;
+     Sleep(sleepingTime);
+     AverageVelocities;
+     Graph;
+  end;
+end;
+
+
+procedure AverageVelocities;   //вычисление средних скоростей для графика
+var  j,n: integer; // counter
+     nums: array[0..NumOfLayers-1] of Integer;
+begin
+ For j:=0 to NumOfLayers-1 do  VxAv[j]:=0;
+ For j:=0 to NumOfLayers-1 do  nums[j]:=0;
+
+ For j:=1 to Np do
+   begin
+     if XY[j,2]<Ly then n:=Trunc(XY[j,2])
+                   else n:=NumOfLayers-1;
+    VxAv[n]:=VxAv[n] + V0[j,1];
+    inc(nums[n]);
+   end;
+
+ For j:=0 to NumOfLayers-1 do
+   if nums[j]>1 then VxAv[j]:=VxAv[j]/nums[j];
+end;
+
+procedure Graph;
+var  imW, imH: integer;  //image size in pixels
+     dy: double;     //scale multipliers
+     i: integer;
+begin
+ imW:=Form1.Image2.Width;
+ imH:=Form1.Image2.Height;
+
+ Form1.Image2.Canvas.Pen.Color:=ClBlack;
+ Form1.Image2.Canvas.Brush.Color:=clWhite;            //canvas - полотно, тут определяем цвет заливки фона
+ Form1.Image2.Canvas.Rectangle(0,0,imW,imH);          //Trunc - целая часть, теперь рисуем кистью фон
+ Form1.Image2.Canvas.Pen.Style:=psSolid;
+
+ Form1.Image2.Canvas.Pen.Color:=clGray;
+ Form1.Image2.Canvas.Pen.Width:=3;
+ Form1.Image2.Canvas.Line(Trunc(0.5*imW),0,Trunc(0.5*imW),imH-1);
+
+ Form1.Image2.Canvas.Pen.Style:=psDash;
+ Form1.Image2.Canvas.Pen.Width:=1;
+ for i:=1 to NumOfLayers-2 do
+   Form1.Image2.Canvas.Line(0,Trunc(dy*i),imW-1,Trunc(dy*i));
+
+ Form1.Image2.Canvas.Pen.Style:=psSolid;
+ Form1.Image2.Canvas.Pen.Color:=ClRed;
+ Form1.Image2.Canvas.Pen.Width:=3;
+
+ dy:=imH/(NumOfLayers-1);
+ for i:=0 to NumOfLayers-2 do
+   Form1.Image2.Canvas.Line(Trunc(0.5*(imW+imW*VxAv[i])),Trunc(imH-dy*i),Trunc(0.5*(imW+imW*VxAv[i+1])),Trunc(imH-dy*(i+1)));
+end;
+end.
